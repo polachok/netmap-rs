@@ -41,6 +41,12 @@ impl NetmapError {
     }
 }
 
+impl fmt::Display for NetmapError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Netmap Error: {}", self.msg)
+    }
+}
+
 /// Common functions for Rx and Tx slots
 pub trait NetmapSlot {
     fn get_len(&self) -> u16;
@@ -537,5 +543,15 @@ impl NetmapDescriptor {
             return None;
         }
         Some(())
+    }
+}
+
+
+impl fmt::Display for NetmapDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match unsafe { self.raw.as_ref() } {
+            None => write!(f, "Netmap FD is NULL"),
+            Some(raw) => write!(f, "Netmap FD: {}", raw.fd),
+        }
     }
 }
