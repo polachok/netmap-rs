@@ -5,7 +5,8 @@ use std::mem;
 use std::ptr;
 use std::slice;
 use std::iter::Iterator;
-use std::ffi::{CStr,CString};
+use std::ffi::{CStr, CString};
+use std::fmt;
 use netmap_sys::netmap;
 use netmap_sys::netmap_user;
 
@@ -26,7 +27,7 @@ pub use netmap_sys::netmap::NR_FORWARD;
 pub enum Direction {
     Input,
     Output,
-    InputOutput
+    InputOutput,
 }
 
 #[derive(Debug)]
@@ -37,6 +38,12 @@ pub struct NetmapError {
 impl NetmapError {
     fn new(msg: String) -> Self {
         NetmapError { msg: msg }
+    }
+}
+
+impl fmt::Display for NetmapError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Netmap Error: {}", self.msg)
     }
 }
 
@@ -76,9 +83,10 @@ impl NetmapSlot for RxSlot {
 
 impl RxSlot {
     #[inline]
-    pub fn get_buf<'b,'a>(&'a self, ring: &RxRing) -> &'b [u8] {
+    pub fn get_buf<'b, 'a>(&'a self, ring: &RxRing) -> &'b [u8] {
         let buf_idx = self.0.buf_idx;
-        let buf = unsafe { netmap_user::NETMAP_BUF(mem::transmute(ring), buf_idx as isize) as *const u8 };
+        let buf =
+            unsafe { netmap_user::NETMAP_BUF(mem::transmute(ring), buf_idx as isize) as *const u8 };
         unsafe { slice::from_raw_parts::<u8>(buf, self.0.len as usize) }
     }
 }
@@ -115,9 +123,10 @@ impl NetmapSlot for TxSlot {
 /// Tx (transfer) slot
 impl TxSlot {
     #[inline]
-    pub fn get_buf_mut<'b,'a>(&'a mut self, ring: &TxRing) -> &'b mut [u8] {
+    pub fn get_buf_mut<'b, 'a>(&'a mut self, ring: &TxRing) -> &'b mut [u8] {
         let buf_idx = self.0.buf_idx;
-        let buf = unsafe { netmap_user::NETMAP_BUF(mem::transmute(ring), buf_idx as isize) as *mut u8 };
+        let buf =
+            unsafe { netmap_user::NETMAP_BUF(mem::transmute(ring), buf_idx as isize) as *mut u8 };
         unsafe { slice::from_raw_parts_mut::<u8>(buf, self.0.len as usize) }
     }
 
@@ -141,7 +150,7 @@ pub struct RxRing(netmap::netmap_ring);
 impl RxRing {
     #[allow(dead_code)]
     #[inline]
-    pub fn get_slot_mut<'a,'b>(&'a self) -> &'b mut RxSlot {
+    pub fn get_slot_mut<'a, 'b>(&'a self) -> &'b mut RxSlot {
         let cur = self.0.cur;
         let slots = &self.0.slot as *const netmap::netmap_slot;
         unsafe { mem::transmute(slots.offset(cur as isize)) }
@@ -175,7 +184,11 @@ impl NetmapRing for RxRing {
 
     #[inline]
     fn next_slot(&mut self) {
-        self.0.cur = if self.0.cur + 1 == self.0.num_slots { 0 } else { self.0.cur + 1 };
+        self.0.cur = if self.0.cur + 1 == self.0.num_slots {
+            0
+        } else {
+            self.0.cur + 1
+        };
         self.0.head = self.0.cur;
     }
 }
@@ -202,7 +215,11 @@ impl<'a> Iterator for RxSlotIter<'a> {
         let slots = self.ring.0.slot.as_mut_ptr();
         let slot: &mut RxSlot = unsafe { mem::transmute(slots.offset(cur as isize)) };
         let buf = slot.get_buf(self.ring);
-        self.cur = if self.cur + 1 == self.ring.0.num_slots { 0 } else { self.cur + 1 };
+        self.cur = if self.cur + 1 == self.ring.0.num_slots {
+            0
+        } else {
+            self.cur + 1
+        };
         Some((slot, buf))
     }
 }
@@ -242,7 +259,7 @@ pub struct TxRing(netmap::netmap_ring);
 
 impl TxRing {
     #[inline]
-    pub fn get_slot_mut<'a,'b>(&'a self) -> &'b mut TxSlot {
+    pub fn get_slot_mut<'a, 'b>(&'a self) -> &'b mut TxSlot {
         let cur = self.0.cur;
         let slots = &self.0.slot as *const netmap::netmap_slot;
         unsafe { mem::transmute(slots.offset(cur as isize)) }
@@ -276,7 +293,11 @@ impl NetmapRing for TxRing {
 
     #[inline]
     fn next_slot(&mut self) {
-        self.0.cur = if self.0.cur + 1 == self.0.num_slots { 0 } else { self.0.cur + 1 };
+        self.0.cur = if self.0.cur + 1 == self.0.num_slots {
+            0
+        } else {
+            self.0.cur + 1
+        };
         self.0.head = self.0.cur;
     }
 }
@@ -320,7 +341,7 @@ impl<'d> Iterator for TxRingIter<'d> {
 /// Slot and buffer iterator
 pub struct TxSlotIter<'a> {
     ring: &'a mut TxRing,
-    cur: u32
+    cur: u32,
 }
 
 impl<'a> Iterator for TxSlotIter<'a> {
@@ -339,7 +360,11 @@ impl<'a> Iterator for TxSlotIter<'a> {
         let slot: &mut TxSlot = unsafe { mem::transmute(slots.offset(cur as isize)) };
         slot.set_len(2048); /* XXX: use buf_size */
         let buf = slot.get_buf_mut(self.ring);
-        self.cur = if self.cur + 1 == self.ring.0.num_slots { 0 } else { self.cur + 1 };
+        self.cur = if self.cur + 1 == self.ring.0.num_slots {
+            0
+        } else {
+            self.cur + 1
+        };
         Some((slot, buf))
     }
 }
@@ -353,7 +378,7 @@ impl<'a> Drop for TxSlotIter<'a> {
 
 /// Netmap descriptor wrapper
 pub struct NetmapDescriptor {
-    raw: *mut netmap_user::nm_desc
+    raw: *mut netmap_user::nm_desc,
 }
 
 unsafe impl Send for NetmapDescriptor {}
@@ -364,13 +389,12 @@ impl NetmapDescriptor {
         let base_nmd: netmap::nmreq = unsafe { mem::zeroed() };
         let netmap_iface = CString::new(format!("netmap:{}", iface)).unwrap();
 
-        let netmap_desc = unsafe { netmap_user::nm_open(netmap_iface.as_ptr(), &base_nmd, 0, ptr::null()) };
+        let netmap_desc =
+            unsafe { netmap_user::nm_open(netmap_iface.as_ptr(), &base_nmd, 0, ptr::null()) };
         if netmap_desc == ptr::null_mut() {
             return Err(NetmapError::new(format!("Can't open {:?}", netmap_iface)));
         }
-        Ok(NetmapDescriptor {
-            raw: netmap_desc
-        })
+        Ok(NetmapDescriptor { raw: netmap_desc })
     }
 
     /// Open new netmap descriptor on interface, sharing memory with parent descriptor
@@ -379,13 +403,16 @@ impl NetmapDescriptor {
         let base_nmd: netmap::nmreq = unsafe { mem::zeroed() };
         let netmap_iface = CString::new(format!("netmap:{}", iface)).unwrap();
 
-        let netmap_desc = unsafe { netmap_user::nm_open(netmap_iface.as_ptr(), &base_nmd, netmap_user::NM_OPEN_NO_MMAP as u64, parent.raw) };
+        let netmap_desc = unsafe {
+            netmap_user::nm_open(netmap_iface.as_ptr(),
+                                 &base_nmd,
+                                 netmap_user::NM_OPEN_NO_MMAP as u64,
+                                 parent.raw)
+        };
         if netmap_desc == ptr::null_mut() {
             return Err(NetmapError::new(format!("Can't open {:?}", netmap_iface)));
         }
-        Ok(NetmapDescriptor {
-            raw: netmap_desc
-        })
+        Ok(NetmapDescriptor { raw: netmap_desc })
     }
 
     pub fn rx_iter<'i, 'd: 'i>(&'d mut self) -> RxRingIter<'i> {
@@ -409,17 +436,19 @@ impl NetmapDescriptor {
     }
 
     /// Open new netmap descriptor using for a particular ring
-    pub fn clone_ring(&self, ring: u16, dir: Direction) -> Result<Self,NetmapError> {
+    pub fn clone_ring(&self, ring: u16, dir: Direction) -> Result<Self, NetmapError> {
         let mut nm_desc_raw: netmap_user::nm_desc = unsafe { (*(self.raw)) };
 
-        /* XXX: check that we opened it with ALL_NIC before */
+        // XXX: check that we opened it with ALL_NIC before
         let (flag, ring_flag) = match dir {
             Direction::Input => (netmap::NR_RX_RINGS_ONLY, netmap::NETMAP_NO_TX_POLL),
             Direction::Output => (netmap::NR_TX_RINGS_ONLY, 0),
             Direction::InputOutput => (0, 0),
         };
         nm_desc_raw.req.nr_flags = netmap::NR_REG_ONE_NIC as u32 | flag as u32;
-        if ring == self.get_rx_rings_count() { nm_desc_raw.req.nr_flags = netmap::NR_REG_SW as u32 | flag };
+        if ring == self.get_rx_rings_count() {
+            nm_desc_raw.req.nr_flags = netmap::NR_REG_SW as u32 | flag
+        };
         nm_desc_raw.req.nr_ringid = ring | ring_flag as u16;
         nm_desc_raw.self_ = &mut nm_desc_raw;
 
@@ -429,15 +458,14 @@ impl NetmapDescriptor {
         let netmap_desc = unsafe {
             netmap_user::nm_open(netmap_ifname.as_ptr(),
                                  ptr::null(),
-                                 netmap_user::NM_OPEN_NO_MMAP as u64 | netmap_user::NM_OPEN_IFNAME as u64 /* | flag as u64 */,
+                                 netmap_user::NM_OPEN_NO_MMAP as u64 |
+                                 netmap_user::NM_OPEN_IFNAME as u64, // | flag as u64
                                  &mut nm_desc_raw)
         };
         if netmap_desc == ptr::null_mut() {
             return Err(NetmapError::new(format!("Can't open ring {}", ring)));
         }
-        Ok(NetmapDescriptor {
-            raw: netmap_desc
-        })
+        Ok(NetmapDescriptor { raw: netmap_desc })
     }
 
     pub fn get_rx_rings_count(&self) -> u16 {
@@ -456,11 +484,11 @@ impl NetmapDescriptor {
     }
 
     /// Returns first and last RX ring
-    pub fn get_rx_rings(&self) -> (u16,u16) {
+    pub fn get_rx_rings(&self) -> (u16, u16) {
         unsafe { ((*self.raw).first_rx_ring, (*self.raw).last_rx_ring) }
     }
 
-    pub fn get_tx_rings(&self) -> (u16,u16) {
+    pub fn get_tx_rings(&self) -> (u16, u16) {
         unsafe { ((*self.raw).first_tx_ring, (*self.raw).last_tx_ring) }
     }
 
@@ -482,7 +510,7 @@ impl NetmapDescriptor {
     fn find_free_tx_ring(&self) -> Option<&mut TxRing> {
         let (first, last) = self.get_tx_rings();
 
-        for ring in first..last+1 {
+        for ring in first..last + 1 {
             let tx_ring = self.get_tx_ring(ring);
             if !tx_ring.is_empty() {
                 return Some(tx_ring);
@@ -515,5 +543,15 @@ impl NetmapDescriptor {
             return None;
         }
         Some(())
+    }
+}
+
+
+impl fmt::Display for NetmapDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match unsafe { self.raw.as_ref() } {
+            None => write!(f, "Netmap FD is NULL"),
+            Some(raw) => write!(f, "Netmap FD: {}", raw.fd),
+        }
     }
 }
