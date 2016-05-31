@@ -376,20 +376,14 @@ impl<'a> Drop for TxSlotIter<'a> {
     }
 }
 
+
 /// Netmap descriptor wrapper
 pub struct NetmapDescriptor {
-    raw: *mut netmap_user::nm_desc,
+    // Never zero.
+    pointer: *mut netmap_user::nm_desc,
 }
 
 unsafe impl Send for NetmapDescriptor {}
-
-impl Drop for NetmapDescriptor {
-    fn drop(&mut self) {
-        unsafe {
-            netmap_user::nm_close(self.raw);
-        }
-    }
-}
 
 impl NetmapDescriptor {
     /// Open new netmap descriptor on interface (no "netmap:" prefix)
@@ -442,7 +436,7 @@ impl NetmapDescriptor {
         NetmapDescriptor::prim_new(&netmap_iface,
                                    &base_nmd,
                                    netmap_user::NM_OPEN_NO_MMAP as u64,
-                                   parent.raw)
+                                   parent.get_sys())
     }
 
     fn prim_new(netmap_iface: &CString,
@@ -453,9 +447,9 @@ impl NetmapDescriptor {
         if let Some(nd) = unsafe {
             netmap_user::nm_open(netmap_iface.as_ptr(), base_nmd, flags, parent).as_mut()
         } {
-            return Ok(NetmapDescriptor { raw: nd });
+            Ok(NetmapDescriptor { pointer: nd })
         } else {
-            return Err(NetmapError::new(format!("Can't open {:?}", netmap_iface)));
+            Err(NetmapError::new(format!("Can't open {:?}", netmap_iface)))
         }
     }
 
@@ -481,7 +475,10 @@ impl NetmapDescriptor {
 
     /// Open new netmap descriptor using for a particular ring
     pub fn clone_ring(&self, ring: u16, dir: Direction) -> Result<Self, NetmapError> {
-        let mut nm_desc_raw: netmap_user::nm_desc = unsafe { (*(self.raw)) };
+        // XXX: I think this does a byte copy of the nm_desc struct...
+        // So really this doesn't make super sense, and we should improve netmap_sys in that
+        // regard.
+        let mut nm_desc: netmap_user::nm_desc = *self.get_sys();
 
         // XXX: check that we opened it with ALL_NIC before
         let (flag, ring_flag) = match dir {
@@ -489,57 +486,59 @@ impl NetmapDescriptor {
             Direction::Output => (netmap::NR_TX_RINGS_ONLY, 0),
             Direction::InputOutput => (0, 0),
         };
-        nm_desc_raw.req.nr_flags = netmap::NR_REG_ONE_NIC as u32 | flag as u32;
+        nm_desc.req.nr_flags = netmap::NR_REG_ONE_NIC as u32 | flag as u32;
         if ring == self.get_rx_rings_count() {
-            nm_desc_raw.req.nr_flags = netmap::NR_REG_SW as u32 | flag
+            nm_desc.req.nr_flags = netmap::NR_REG_SW as u32 | flag
         };
-        nm_desc_raw.req.nr_ringid = ring | ring_flag as u16;
-        nm_desc_raw.self_ = &mut nm_desc_raw;
+        nm_desc.req.nr_ringid = ring | ring_flag as u16;
+        nm_desc.self_ = &mut nm_desc;
 
-        let ifname = unsafe { CStr::from_ptr(nm_desc_raw.req.nr_name.as_ptr()).to_str().unwrap() };
+        let ifname = unsafe { CStr::from_ptr(nm_desc.req.nr_name.as_ptr()).to_str().unwrap() };
         let netmap_ifname = CString::new(format!("netmap:{}", ifname)).unwrap();
 
         NetmapDescriptor::prim_new(&netmap_ifname,
                                    ptr::null(),
                                    netmap_user::NM_OPEN_NO_MMAP as u64 |
                                    netmap_user::NM_OPEN_IFNAME as u64, // | flag as u64
-                                   &mut nm_desc_raw)
+                                   &nm_desc)
     }
 
     pub fn get_rx_rings_count(&self) -> u16 {
-        let nifp = unsafe { (*self.raw).nifp };
+        let nifp = self.get_sys().nifp;
         unsafe { (*nifp).ni_rx_rings as u16 }
     }
 
     pub fn get_tx_rings_count(&self) -> u16 {
-        let nifp = unsafe { (*self.raw).nifp };
+        let nifp = self.get_sys().nifp;
         unsafe { (*nifp).ni_tx_rings as u16 }
     }
 
     #[allow(dead_code)]
     pub fn get_flags(&self) -> u32 {
-        unsafe { (*self.raw).req.nr_flags }
+        self.get_sys().req.nr_flags
     }
 
     /// Returns first and last RX ring
     pub fn get_rx_rings(&self) -> (u16, u16) {
-        unsafe { ((*self.raw).first_rx_ring, (*self.raw).last_rx_ring) }
+        let &nm_desc = self.get_sys();
+        (nm_desc.first_rx_ring, nm_desc.last_rx_ring)
     }
 
     pub fn get_tx_rings(&self) -> (u16, u16) {
-        unsafe { ((*self.raw).first_tx_ring, (*self.raw).last_tx_ring) }
+        let &nm_desc = self.get_sys();
+        (nm_desc.first_tx_ring, nm_desc.last_tx_ring)
     }
 
     #[inline]
     fn get_tx_ring(&self, ring: u16) -> &mut TxRing {
-        let nifp = unsafe { (*self.raw).nifp };
+        let nifp = self.get_sys().nifp;
 
         unsafe { mem::transmute(netmap_user::NETMAP_TXRING(nifp, ring as isize)) }
     }
 
     #[inline]
     fn get_rx_ring(&self, ring: u16) -> &mut RxRing {
-        let nifp = unsafe { (*self.raw).nifp };
+        let nifp = self.get_sys().nifp;
 
         unsafe { mem::transmute(netmap_user::NETMAP_RXRING(nifp, ring as isize)) }
     }
@@ -559,14 +558,13 @@ impl NetmapDescriptor {
 
     #[allow(dead_code)]
     pub fn get_fd(&self) -> i32 {
-        unsafe { (*self.raw).fd }
+        self.get_sys().fd
     }
 
     pub fn poll(&mut self, dir: Direction) -> Option<()> {
-        let fd = unsafe { (*self.raw).fd };
         let mut pollfd: libc::pollfd = unsafe { mem::zeroed() };
 
-        pollfd.fd = fd;
+        pollfd.fd = self.get_fd();
         pollfd.events = match dir {
             Direction::Input => libc::POLLIN,
             Direction::Output => libc::POLLOUT,
@@ -584,12 +582,32 @@ impl NetmapDescriptor {
     }
 }
 
+// Private functions.
+impl NetmapDescriptor {
+    /// Take a reference.
+    fn get_sys(&self) -> &netmap_user::nm_desc {
+        unsafe { &*self.pointer }
+    }
+
+    /// Take a mutable reference.
+    #[allow(dead_code)]
+    fn get_mut_sys(&mut self) -> &mut netmap_user::nm_desc {
+        unsafe { &mut *self.pointer }
+    }
+}
+
 
 impl fmt::Display for NetmapDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match unsafe { self.raw.as_ref() } {
-            None => write!(f, "Netmap FD is NULL"),
-            Some(raw) => write!(f, "Netmap FD: {}", raw.fd),
+        write!(f, "Netmap FD: {}", self.get_sys().fd)
+    }
+}
+
+
+impl Drop for NetmapDescriptor {
+    fn drop(self: &mut NetmapDescriptor) {
+        unsafe {
+            netmap_user::nm_close(self.get_mut_sys());
         }
     }
 }
