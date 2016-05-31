@@ -393,6 +393,23 @@ impl Drop for NetmapDescriptor {
 
 impl NetmapDescriptor {
     /// Open new netmap descriptor on interface (no "netmap:" prefix)
+    ///
+    /// iface is the port name. e.g. eth0 for eth0.
+    ///   	a suffix can indicate the following:
+    ///   	^		bind the host (sw) ring pair
+    ///   	*		bind host and NIC ring pairs (transparent)
+    ///   	-NN		bind individual NIC ring pair
+    ///   	{NN		bind master side of pipe NN
+    ///   	}NN		bind slave side of pipe NN
+    ///   	a suffix starting with / and the following flags,
+    ///   	in any order:
+    ///   	x		exclusive access
+    ///   	z		zero copy monitor
+    ///   	t		monitor tx side
+    ///   	r		monitor rx side
+    ///   	R		bind only RX ring(s)
+    ///   	T		bind only TX ring(s)
+    ///
     pub fn new(iface: &str) -> Result<Self, NetmapError> {
         let base_nmd: netmap::nmreq = unsafe { mem::zeroed() };
         let netmap_iface = CString::new(format!("netmap:{}", iface)).unwrap();
@@ -407,6 +424,24 @@ impl NetmapDescriptor {
 
     /// Open new netmap descriptor on interface, sharing memory with parent descriptor
     /// (for zero-copy forwarding between interfaces)
+    ///
+    /// iface is the port name. e.g. eth0 for eth0.
+    ///   	a suffix can indicate the following:
+    ///   	^		bind the host (sw) ring pair
+    ///   	*		bind host and NIC ring pairs (transparent)
+    ///   	-NN		bind individual NIC ring pair
+    ///   	{NN		bind master side of pipe NN
+    ///   	}NN		bind slave side of pipe NN
+    ///   	a suffix starting with / and the following flags,
+    ///   	in any order:
+    ///   	x		exclusive access
+    ///   	z		zero copy monitor
+    ///   	t		monitor tx side
+    ///   	r		monitor rx side
+    ///   	R		bind only RX ring(s)
+    ///   	T		bind only TX ring(s)
+    ///
+    /// parent is another NetmapDescriptor to share the buffer region with.
     pub fn new_with_memory(iface: &str, parent: &NetmapDescriptor) -> Result<Self, NetmapError> {
         let base_nmd: netmap::nmreq = unsafe { mem::zeroed() };
         let netmap_iface = CString::new(format!("netmap:{}", iface)).unwrap();
