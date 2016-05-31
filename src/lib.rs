@@ -556,11 +556,11 @@ impl NetmapDescriptor {
         return None;
     }
 
-    #[allow(dead_code)]
     pub fn get_fd(&self) -> i32 {
         self.get_sys().fd
     }
 
+    #[deprecated]
     pub fn poll(&mut self, dir: Direction) -> Option<()> {
         let mut pollfd: libc::pollfd = unsafe { mem::zeroed() };
 
