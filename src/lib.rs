@@ -413,13 +413,7 @@ impl NetmapDescriptor {
     pub fn new(iface: &str) -> Result<Self, NetmapError> {
         let base_nmd: netmap::nmreq = unsafe { mem::zeroed() };
         let netmap_iface = CString::new(format!("netmap:{}", iface)).unwrap();
-
-        let netmap_desc =
-            unsafe { netmap_user::nm_open(netmap_iface.as_ptr(), &base_nmd, 0, ptr::null()) };
-        if netmap_desc == ptr::null_mut() {
-            return Err(NetmapError::new(format!("Can't open {:?}", netmap_iface)));
-        }
-        Ok(NetmapDescriptor { raw: netmap_desc })
+        NetmapDescriptor::prim_new(&netmap_iface, &base_nmd, 0, ptr::null())
     }
 
     /// Open new netmap descriptor on interface, sharing memory with parent descriptor
@@ -445,17 +439,24 @@ impl NetmapDescriptor {
     pub fn new_with_memory(iface: &str, parent: &NetmapDescriptor) -> Result<Self, NetmapError> {
         let base_nmd: netmap::nmreq = unsafe { mem::zeroed() };
         let netmap_iface = CString::new(format!("netmap:{}", iface)).unwrap();
+        NetmapDescriptor::prim_new(&netmap_iface,
+                                   &base_nmd,
+                                   netmap_user::NM_OPEN_NO_MMAP as u64,
+                                   parent.raw)
+    }
 
-        let netmap_desc = unsafe {
-            netmap_user::nm_open(netmap_iface.as_ptr(),
-                                 &base_nmd,
-                                 netmap_user::NM_OPEN_NO_MMAP as u64,
-                                 parent.raw)
-        };
-        if netmap_desc == ptr::null_mut() {
+    fn prim_new(netmap_iface: &CString,
+                base_nmd: *const netmap::nmreq,
+                flags: u64,
+                parent: *const netmap_user::nm_desc)
+                -> Result<Self, NetmapError> {
+        if let Some(nd) = unsafe {
+            netmap_user::nm_open(netmap_iface.as_ptr(), base_nmd, flags, parent).as_mut()
+        } {
+            return Ok(NetmapDescriptor { raw: nd });
+        } else {
             return Err(NetmapError::new(format!("Can't open {:?}", netmap_iface)));
         }
-        Ok(NetmapDescriptor { raw: netmap_desc })
     }
 
     pub fn rx_iter<'i, 'd: 'i>(&'d mut self) -> RxRingIter<'i> {
@@ -498,17 +499,11 @@ impl NetmapDescriptor {
         let ifname = unsafe { CStr::from_ptr(nm_desc_raw.req.nr_name.as_ptr()).to_str().unwrap() };
         let netmap_ifname = CString::new(format!("netmap:{}", ifname)).unwrap();
 
-        let netmap_desc = unsafe {
-            netmap_user::nm_open(netmap_ifname.as_ptr(),
-                                 ptr::null(),
-                                 netmap_user::NM_OPEN_NO_MMAP as u64 |
-                                 netmap_user::NM_OPEN_IFNAME as u64, // | flag as u64
-                                 &mut nm_desc_raw)
-        };
-        if netmap_desc == ptr::null_mut() {
-            return Err(NetmapError::new(format!("Can't open ring {}", ring)));
-        }
-        Ok(NetmapDescriptor { raw: netmap_desc })
+        NetmapDescriptor::prim_new(&netmap_ifname,
+                                   ptr::null(),
+                                   netmap_user::NM_OPEN_NO_MMAP as u64 |
+                                   netmap_user::NM_OPEN_IFNAME as u64, // | flag as u64
+                                   &mut nm_desc_raw)
     }
 
     pub fn get_rx_rings_count(&self) -> u16 {
