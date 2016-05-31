@@ -1,0 +1,12 @@
+[package]
+name = "netmap"
+version = "0.1.0"
+authors = ["Alexander Polakov <apolyakov@beget.ru>"]
+
+[dependencies]
+libc = "0.2.11"
+
+[dependencies.netmap_sys]
+git = "https://github.com/libpnet/netmap_sys"
+rev = "6bd88eab680144df3eb4c52b7783f63b6a8e73df"
+features = [ "netmap_with_libs" ]
