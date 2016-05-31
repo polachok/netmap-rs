@@ -383,6 +383,14 @@ pub struct NetmapDescriptor {
 
 unsafe impl Send for NetmapDescriptor {}
 
+impl Drop for NetmapDescriptor {
+    fn drop(&mut self) {
+        unsafe {
+            netmap_user::nm_close(self.raw);
+        }
+    }
+}
+
 impl NetmapDescriptor {
     /// Open new netmap descriptor on interface (no "netmap:" prefix)
     pub fn new(iface: &str) -> Result<Self, NetmapError> {
