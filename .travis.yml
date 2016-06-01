@@ -1,0 +1,11 @@
+language: rust
+rust:
+    - stable
+    - beta
+    - nightly
+env:
+    - CFLAGS=-I/home/travis/build/polachok/netmap/sys
+script:
+  - |
+      git clone --depth=1 https://github.com/luigirizzo/netmap /home/travis/build/polachok/netmap &&
+      cargo build --verbose && cargo test --verbose
