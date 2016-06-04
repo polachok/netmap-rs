@@ -1,6 +1,7 @@
 extern crate netmap_sys;
 extern crate libc;
 
+use std::error;
 use std::mem;
 use std::ptr;
 use std::slice;
@@ -44,6 +45,16 @@ impl NetmapError {
 impl fmt::Display for NetmapError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Netmap Error: {}", self.msg)
+    }
+}
+
+impl error::Error for NetmapError {
+    fn description(&self) -> &str {
+        &self.msg
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        None
     }
 }
 
