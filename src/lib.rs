@@ -150,9 +150,16 @@ impl TxSlot {
 /// Functions common to Tx and Rx netmap rings
 pub trait NetmapRing {
     fn id(&self) -> u16;
+
     fn is_empty(&self) -> bool;
+
+    /// Advance the cur pointer to the next slot in the ring.
     fn next_slot(&mut self);
+
     fn set_flags(&mut self, flag: u32);
+
+    /// Sync the head pointer to the value of cur.
+    fn head_from_cur(&mut self);
 }
 
 /// Rx (receive) ring
@@ -167,6 +174,9 @@ impl RxRing {
         unsafe { mem::transmute(slots.offset(cur as isize)) }
     }
 
+    /// Iterate over (slot, buffer) tuples.
+    ///
+    /// Advances cur as it progresses. Does not advance head.
     #[inline]
     pub fn iter(&mut self) -> RxSlotIter {
         let cur = self.0.cur;
@@ -200,6 +210,10 @@ impl NetmapRing for RxRing {
         } else {
             self.0.cur + 1
         };
+    }
+
+    #[inline]
+    fn head_from_cur(&mut self) {
         self.0.head = self.0.cur;
     }
 }
@@ -211,13 +225,24 @@ pub struct RxSlotIter<'a> {
     cur: u32,
 }
 
+impl<'a> RxSlotIter<'a> {
+    /// Push a single slot back. Useful when using e.g. zip and the iterator will be advanced
+    /// without actually wanting to accept that packet.
+    pub fn give_back(&mut self) {
+        self.cur = if self.cur > 0 {
+            self.cur - 1
+        } else {
+            self.ring.0.num_slots - 1
+        };
+    }
+}
+
 impl<'a> Iterator for RxSlotIter<'a> {
     type Item = (&'a mut RxSlot, &'a [u8]);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.ring.0.cur = self.cur;
-        self.ring.0.head = self.ring.0.cur;
 
         if self.ring.is_empty() {
             return None;
@@ -238,7 +263,6 @@ impl<'a> Iterator for RxSlotIter<'a> {
 impl<'a> Drop for RxSlotIter<'a> {
     fn drop(&mut self) {
         self.ring.0.cur = self.cur;
-        self.ring.0.head = self.ring.0.cur;
     }
 }
 
@@ -276,10 +300,13 @@ impl TxRing {
         unsafe { mem::transmute(slots.offset(cur as isize)) }
     }
 
+    /// Iterate over (slot, buffer) tuples.
+    ///
+    /// Advances cur as it progresses. Does not advance head.
     #[inline]
-    pub fn iter(&mut self) -> TxSlotIter {
+    pub fn iter_mut(&mut self) -> TxSlotIterMut {
         let cur = self.0.cur;
-        TxSlotIter {
+        TxSlotIterMut {
             ring: self,
             cur: cur,
         }
@@ -309,9 +336,14 @@ impl NetmapRing for TxRing {
         } else {
             self.0.cur + 1
         };
+    }
+
+    #[inline]
+    fn head_from_cur(&mut self) {
         self.0.head = self.0.cur;
     }
 }
+
 
 impl<'a> Iterator for &'a mut TxRing {
     type Item = &'a mut TxSlot;
@@ -350,18 +382,29 @@ impl<'d> Iterator for TxRingIter<'d> {
 }
 
 /// Slot and buffer iterator
-pub struct TxSlotIter<'a> {
+pub struct TxSlotIterMut<'a> {
     ring: &'a mut TxRing,
     cur: u32,
 }
 
-impl<'a> Iterator for TxSlotIter<'a> {
+impl<'a> TxSlotIterMut<'a> {
+    /// Push a single slot back. Useful when using e.g. zip and the iterator will be advanced
+    /// without actually wanting to send that packet.
+    pub fn give_back(&mut self) {
+        self.cur = if self.cur > 0 {
+            self.cur - 1
+        } else {
+            self.ring.0.num_slots - 1
+        };
+    }
+}
+
+impl<'a> Iterator for TxSlotIterMut<'a> {
     type Item = (&'a mut TxSlot, &'a mut [u8]);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.ring.0.cur = self.cur;
-        self.ring.0.head = self.ring.0.cur;
 
         if self.ring.is_empty() {
             return None;
@@ -380,10 +423,9 @@ impl<'a> Iterator for TxSlotIter<'a> {
     }
 }
 
-impl<'a> Drop for TxSlotIter<'a> {
+impl<'a> Drop for TxSlotIterMut<'a> {
     fn drop(&mut self) {
         self.ring.0.cur = self.cur;
-        self.ring.0.head = self.ring.0.cur;
     }
 }
 
